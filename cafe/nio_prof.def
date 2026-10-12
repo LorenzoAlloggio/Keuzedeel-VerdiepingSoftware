@@ -1,8 +1,0 @@
-:NAME nio_prof
-
-:TEXT
-IO_ProfilerGetStatsAndEndCheckpoint
-IO_ProfilerGetStatsAndRestartCheckpoint
-IO_ProfilerLibFinish
-IO_ProfilerLibInit
-IO_ProfilerStartCheckpoint

@@ -1,9 +1,0 @@
-:NAME uac
-
-:TEXT
-UACClose
-UACFreeISODesc
-UACGetAudio
-UACInit
-UACOpen
-UACRequest
