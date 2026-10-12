@@ -30,12 +30,18 @@
 #include "text.h"
 #include "logger.h"
 #include "fsa.h"
+#include "mcp_config.h"
 
 #define IOS_ERROR_UNKNOWN_VALUE     0xFFFFFFD6
 #define IOS_ERROR_INVALID_ARG       0xFFFFFFE3
 #define IOS_ERROR_INVALID_SIZE      0xFFFFFFE9
 #define IOS_ERROR_UNKNOWN           0xFFFFFFF7
 #define IOS_ERROR_NOEXISTS          0xFFFFFFFA
+
+#define IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED 0xFD
+#define IPC_CUSTOM_COPY_ENVIRONMENT_PATH  0xF9
+#define IPC_CUSTOM_GET_MOCHA_API_VERSION  0xF8
+#define MOCHA_API_VERSION                 1
 
 #define IOCTL_MEM_WRITE             0x00
 #define IOCTL_MEM_READ              0x01
@@ -71,7 +77,13 @@
 #define IOCTL_FSA_RAW_CLOSE         0x57
 #define IOCTL_FSA_CHANGEMODE        0x58
 
+#define IOCTL_READ_OTP              0x60
+#define IOCTL_READ_SEEPROM          0x61
+
+mcp_config_t mcp_config __attribute__((section(".mcp_config")));  
+
 static u8 threadStack[0x1000] __attribute__((aligned(0x20)));
+static u32 iosuhaxOpenCount;
 
 static int ipc_ioctl(ipcmessage *message)
 {
@@ -404,12 +416,63 @@ static int ipc_ioctl(ipcmessage *message)
         message->ioctl.buffer_io[0] = FSA_ChangeMode(fd, path, mode);
         break;
     }
+case IOCTL_READ_OTP:                                                                  
+    {                                                                                    
+        if(message->ioctl.length_io < sizeof(mcp_config.otp))                          
+            res = IOS_ERROR_INVALID_SIZE;                                                
+        else if(!mcp_config.filled)                                                       
+            res = IOS_ERROR_NOEXISTS;                                                   
+        else                                                                            
+            memcpy(message->ioctl.buffer_io, mcp_config.otp, sizeof(mcp_config.otp));    
+        break;                                                                           
+    }                                                                                   
+    case IOCTL_READ_SEEPROM:                                                            
+    {                                                                                   
+        if(message->ioctl.length_io < sizeof(mcp_config.seeprom))                       
+            res = IOS_ERROR_INVALID_SIZE;                                               
+        else if(!mcp_config.filled)                                                       
+            res = IOS_ERROR_NOEXISTS;                                                   
+        else                                                                             
+            memcpy(message->ioctl.buffer_io, mcp_config.seeprom, sizeof(mcp_config.seeprom)); 
+        break;                                                                           
+    }                                                                                    
     default:
         res = IOS_ERROR_INVALID_ARG;
         break;
     }
 
     return res;
+}
+
+int _MCP_ioctl100_patch(ipcmessage *message)
+{
+    if (!message || !message->ioctl.buffer_in || message->ioctl.length_in < sizeof(u32))
+        return IOS_ERROR_INVALID_SIZE;
+
+    switch (message->ioctl.buffer_in[0])
+    {
+    case IPC_CUSTOM_GET_MOCHA_API_VERSION:
+        if (!message->ioctl.buffer_io || message->ioctl.length_io < 2 * sizeof(u32))
+            return IOS_ERROR_INVALID_SIZE;
+
+        message->ioctl.buffer_io[0] = 0xCAFEBABE;
+        message->ioctl.buffer_io[1] = MOCHA_API_VERSION;
+        return 0;
+
+    case IPC_CUSTOM_COPY_ENVIRONMENT_PATH:
+        if (!message->ioctl.buffer_io || message->ioctl.length_io < 0x100)
+            return IOS_ERROR_INVALID_SIZE;
+
+        memcpy(message->ioctl.buffer_io, (void *)0x0511FF00, 0xFF);
+        ((char *)message->ioctl.buffer_io)[0xFF] = '\0';
+        return 0;
+
+    case IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED:
+        return 0;
+
+    default:
+        return 0;
+    }
 }
 
 static int ipc_thread(void *arg)
@@ -439,7 +502,15 @@ static int ipc_thread(void *arg)
             case IOS_OPEN:
             {
                 log_printf("IOS_OPEN\n");
-                res = 0;
+                if (iosuhaxOpenCount == 0)
+                {
+                    iosuhaxOpenCount = 1;
+                    res = IOS_ERROR_NOEXISTS;
+                }
+                else
+                {
+                    res = 0;
+                }
                 break;
             }
             case IOS_CLOSE:

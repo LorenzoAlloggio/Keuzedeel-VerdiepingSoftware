@@ -83,4 +83,3 @@ void log_printf_(const char *format, ...) {
     if(tmp)
         free(tmp);
 }
-
