@@ -60,16 +60,18 @@ int Menu_Main(int argc, char ** argv){
         ExecuteIOSExploit(&config);
     }
 
+    int fullRelaunch = launch && !config.dumpNetwork;
+
     if (
         OSGetTitleID() == 0x000500101004A200L || // mii maker eur
         OSGetTitleID() == 0x000500101004A100L || // mii maker usa
         OSGetTitleID() == 0x000500101004A000L) {   // mii maker jpn
 
         // restart mii maker.
-        if (launch) {
+        if (fullRelaunch) {
             OSForceFullRelaunch();
             SYSLaunchMenu();
-        } else {
+        } else if (!launch) {
             OSShutdown();
         }
         return ( (int (*)(int, char **))(*(unsigned int*)0x1005E040) )(argc, argv);
@@ -77,10 +79,13 @@ int Menu_Main(int argc, char ** argv){
     
     ProcUIInit(OSSavesDone_ReadyToRelease);
     
-    if (launch) {
+    if (fullRelaunch) {
         OSForceFullRelaunch();
         SYSLaunchMenu();
-    } else {
+    } else if (launch) {
+        SYSLaunchMenu();
+    }
+    else{
         OSShutdown();
     }
 

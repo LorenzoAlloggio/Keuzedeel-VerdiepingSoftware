@@ -7,6 +7,7 @@ typedef struct {
     int dump_mlc;
     int dump_otp;
     int dump_seeprom;
+    int dump_network;
     char otp_buffer[0x400];
     char seeprom_buffer[0x200];
 } fs_config;

@@ -38,7 +38,7 @@
 
 extern int vasprintf(char **strp, const char *fmt, va_list ap);
 
-#define MAX_CONFIG_SETTINGS 5
+#define MAX_CONFIG_SETTINGS 6
 //#define MAX_CONFIG_SETTINGS_EXPERT          9
 //#define MAX_CONFIG_SETTINGS_DEFAULT         (MAX_CONFIG_SETTINGS_EXPERT - 3)
 
@@ -64,6 +64,7 @@ struct {
     { "Dump MLC (8GB/32GB)", "yes", "no" },
     { "Dump OTP (1KB)", "yes", "no" },
     { "Dump SEEPROM (1KB)", "yes", "no" },
+    { "Dump over network", "yes", "no" },
 };
 
 static void console_print_pos(int x, int y, const char *format, ...)
@@ -170,6 +171,9 @@ int ShowMenu(cfw_config_t * currentConfig)
                     break;
                 case 4:
                     config.dumpSeeprom = !config.dumpSeeprom;
+                    break;
+                case 5:
+                    config.dumpNetwork = !config.dumpNetwork;
                     break;
                 /*case 0:
                     config.viewMode = !config.viewMode;

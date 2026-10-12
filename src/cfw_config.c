@@ -90,6 +90,7 @@ void default_config(cfw_config_t * config)
     config->dumpMlc = 0;
     config->dumpOtp = 1;
     config->dumpSeeprom = 1;
+    config->dumpNetwork = 0;
 }
 
 /*int read_config(cfw_config_t * config)

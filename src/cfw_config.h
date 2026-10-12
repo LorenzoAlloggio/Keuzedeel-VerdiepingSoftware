@@ -44,6 +44,7 @@ typedef struct
     int dumpMlc;
     int dumpOtp;
     int dumpSeeprom;
+    int dumpNetwork;
 } cfw_config_t;
 
 void default_config(cfw_config_t * config);

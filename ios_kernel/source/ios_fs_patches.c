@@ -49,6 +49,7 @@
 #define FS_MLC_WRITE2                               0x107DC73C
 #define FS_SDCARD_READ1                             0x107BDDD0
 #define FS_SDCARD_WRITE1                            0x107BDD60
+#define FS_RAWOPEN_PATCH_ADDR                       0x1070FAE8
 
 extern const patch_table_t fs_patches_table[];
 extern const patch_table_t fs_patches_table_end[];
@@ -72,6 +73,23 @@ void fs_run_patches(u32 ios_elf_start)
     // patch FS logging
     section_write_word(ios_elf_start, FS_PRINTF_SYSLOG, ARM_B(FS_PRINTF_SYSLOG, FS_SYSLOG_OUTPUT));
 
+    // Network mode: only allow raw opens, then stop.                                                     
+    // No SD/SLC redirection hooks, no ECC hook, no dump thread.                                            
+    if (cfw_config.dumpNetwork)                                                                               
+    {                                                                                                         
+        u32 patch_count = (u32)(((u8*)fs_patches_table_end) - ((u8*)fs_patches_table)) / sizeof(patch_table_t); 
+        u32 i;                                                                                              
+        for (i = 0; i < patch_count; i++)                                                                  
+        {                                                                                                
+            if (fs_patches_table[i].address == FS_RAWOPEN_PATCH_ADDR)                                       
+            {                                                                                               
+                patch_table_entries(ios_elf_start, &fs_patches_table[i], 1);                                  
+                break;                                                                                      
+            }                                                                                        
+        }                                                                                                   
+        return;                                                                                            
+    }              
+
     section_write_word(ios_elf_start, CALL_FS_REGISTERMDPHYSICALDEVICE, ARM_BL(CALL_FS_REGISTERMDPHYSICALDEVICE, registerMdDevice_hook));
     section_write_word(ios_elf_start, FS_GETMDDEVICEBYID + 8, ARM_BL((FS_GETMDDEVICEBYID + 8), getMdDeviceById_hook));
 
@@ -90,6 +108,7 @@ void fs_run_patches(u32 ios_elf_start)
     config.dump_mlc = cfw_config.dumpMlc;
     config.dump_otp = cfw_config.dumpOtp;
     config.dump_seeprom = cfw_config.dumpSeeprom;
+    config.dump_network = cfw_config.dumpNetwork;
     if (cfw_config.dumpOtp)
         kernel_memcpy(config.otp_buffer, otp_buffer, sizeof(config.otp_buffer));
     if (cfw_config.dumpSeeprom)
