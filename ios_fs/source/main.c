@@ -2,10 +2,12 @@
 #include "sdio.h"
 #include "dumper.h"
 #include "imports.h"
+#include "fs_config.h"
 
 #define INITIALIZING_FLA        0x07
 #define INITIALIZING_MMC        0x0D
 
+extern fs_config dumper_config;
 
 int getPhysicalDeviceHandle(u32 device);
 
@@ -13,7 +15,10 @@ void createDevThread_entry(int initialization_type)
 {
     if(initialization_type == INITIALIZING_MMC)
     {
-        sdcard_init();
+        if (!dumper_config.dump_network)
+        {
+            sdcard_init();
+        }
     }
 
     //if(initialization_type == INITIALIZING_FLA)

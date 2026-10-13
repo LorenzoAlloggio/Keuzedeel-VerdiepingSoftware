@@ -18,9 +18,8 @@
 #include <whb/log_udp.h>
 #include <wups.h>
 
-// Current behavior: test raw opens, then send a TCP marker. No NAND dump yet.
-WUPS_PLUGIN_NAME("NandDumper Auto Raw-Open Test");
-WUPS_PLUGIN_DESCRIPTION("Tests iosuhax raw opens and TCP connectivity.");
+WUPS_PLUGIN_NAME("NandDumper Auto Test");
+WUPS_PLUGIN_DESCRIPTION("Streams an SLC dump over the network.");
 WUPS_PLUGIN_VERSION("2.0");
 WUPS_PLUGIN_AUTHOR("LorenzoAlloggio");
 WUPS_PLUGIN_LICENSE("Unspecified");
@@ -36,10 +35,12 @@ WUPS_USE_WUT_DEVOPTAB();
 #define TRANSFER_SERVER_IP "192.168.2.50" // Receiver IP, update if it changes.
 #define TRANSFER_SERVER_PORT 4406
 #define READ_RETRIES 3
-#define MAX_BAD_SECTORS 64
+#define MAX_BAD_SECTORS 4096
 
+#define FSA_ERROR_DATA_CORRUPTED (-0x3001B)
+#define FSA_ERROR_OUT_OF_RANGE (-0x3002B)
 
-static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x840;
+static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x800;
 static constexpr uint32_t SLC_SECTOR_COUNT = 0x40000;
 static constexpr uint32_t CHUNK_SECTORS = 0x80;
 
@@ -48,6 +49,12 @@ static uint8_t zero_sector[SLC_BYTES_PER_SECTOR];
 static uint8_t raw_read_output[0x40 + CHUNK_SECTORS * SLC_BYTES_PER_SECTOR]
     __attribute__((aligned(0x40)));
 static uint32_t raw_read_args[6] __attribute__((aligned(0x40)));
+
+struct RawReadDiagnostics
+{
+    IOSError ioctl_result;
+    int32_t raw_status;
+};
 
 // Buffers for the existing raw-open test.
 static unsigned int in_buf[0x40] __attribute__((aligned(0x40)));
@@ -89,12 +96,15 @@ static int __attribute__((unused)) read_raw_sectors(
     int fsa_handle,
     int raw_device_handle,
     uint64_t first_sector,
-    uint32_t sector_count)
+    uint32_t sector_count,
+    RawReadDiagnostics *diagnostics)
 {
     if (sector_count == 0 || sector_count > CHUNK_SECTORS ||
         first_sector >= SLC_SECTOR_COUNT ||
         sector_count > SLC_SECTOR_COUNT - first_sector)
     {
+        diagnostics->ioctl_result = IOS_ERROR_INVALID;
+        diagnostics->raw_status = 0;
         return IOS_ERROR_INVALID;
     }
 
@@ -108,14 +118,17 @@ static int __attribute__((unused)) read_raw_sectors(
     raw_read_args[4] = static_cast<uint32_t>(first_sector);
     raw_read_args[5] = static_cast<uint32_t>(raw_device_handle);
 
-    IOSError result = IOS_Ioctl(
+    diagnostics->ioctl_result = IOS_Ioctl(
         iosuhax,
         IOCTL_FSA_RAW_READ,
         raw_read_args,
         sizeof(raw_read_args),
         raw_read_output,
         0x40 + sector_count * SLC_BYTES_PER_SECTOR);
-    return result < 0 ? result : static_cast<int>(*reinterpret_cast<uint32_t *>(raw_read_output));
+    memcpy(&diagnostics->raw_status, raw_read_output, sizeof(diagnostics->raw_status));
+    return diagnostics->ioctl_result < 0
+               ? diagnostics->ioctl_result
+               : diagnostics->raw_status;
 }
 
 static int read_with_retry(
@@ -123,14 +136,19 @@ static int read_with_retry(
     int fsa_handle,
     int raw_device_handle,
     uint64_t first_sector,
-    uint32_t sector_count)
+    uint32_t sector_count,
+    RawReadDiagnostics *diagnostics,
+    uint32_t *attempts_used)
 {
     int result = -1;
+    *attempts_used = 0;
     for (int attempt = 0; attempt < READ_RETRIES; attempt++)
     {
+        (*attempts_used)++;
         result = read_raw_sectors(
-            iosuhax, fsa_handle, raw_device_handle, first_sector, sector_count);
-        if (result >= 0)
+            iosuhax, fsa_handle, raw_device_handle, first_sector, sector_count,
+            diagnostics);
+        if (result >= 0 || result == FSA_ERROR_DATA_CORRUPTED)
         {
             return result;
         }
@@ -222,7 +240,7 @@ static void run_network_test(void)
 }
 
 // Dump SLC
-static void __attribute__((unused)) dump_slc_example(void)
+static void dump_slc_example(void)
 {
     IOSHandle iosuhax = IOS_Open("/dev/iosuhax", (IOSOpenMode)0);
     if (iosuhax < 0)
@@ -287,7 +305,9 @@ static void __attribute__((unused)) dump_slc_example(void)
 
     if (socket_fd >= 0)
     {
-        log_message("SLC dump: reading %u sectors", SLC_SECTOR_COUNT);
+        log_message(
+            "SLC dump: reading %u data sectors (%u bytes each; spare area excluded)",
+            SLC_SECTOR_COUNT, SLC_BYTES_PER_SECTOR);
         uint64_t sector = 0;
         uint32_t bad_sectors = 0;
         bool aborted = false;
@@ -297,8 +317,11 @@ static void __attribute__((unused)) dump_slc_example(void)
             uint32_t remaining = SLC_SECTOR_COUNT - sector;
             uint32_t count = remaining < CHUNK_SECTORS ? remaining : CHUNK_SECTORS;
 
+            RawReadDiagnostics read_diagnostics = {};
+            uint32_t chunk_attempts = 0;
             int read_result = read_with_retry(
-                iosuhax, fsa_handle, raw_device_handle, sector, count);
+                iosuhax, fsa_handle, raw_device_handle, sector, count,
+                &read_diagnostics, &chunk_attempts);
 
             if (read_result >= 0)
             {
@@ -314,27 +337,51 @@ static void __attribute__((unused)) dump_slc_example(void)
             else
             {
                 // Chunk failed after retries
-                log_message("SLC dump: chunk at sector %llu failed (err %d), "
-                            "reading one sector at a time",
+                log_message("SLC dump: chunk at sector %llu failed after %d attempts "
+                            "(ioctl=%d, raw_status=%d%s), reading one sector at a time",
                             static_cast<unsigned long long>(sector),
-                            read_result);
+                            chunk_attempts,
+                            read_diagnostics.ioctl_result,
+                            read_diagnostics.raw_status,
+                            read_diagnostics.ioctl_result < 0
+                                ? ", raw status may be invalid"
+                                : "");
 
                 for (uint32_t i = 0; i < count; i++)
                 {
+                    RawReadDiagnostics sector_diagnostics = {};
+                    uint32_t sector_attempts = 0;
                     int r = read_with_retry(
-                        iosuhax, fsa_handle, raw_device_handle, sector + i, 1);
+                        iosuhax, fsa_handle, raw_device_handle, sector + i, 1,
+                        &sector_diagnostics, &sector_attempts);
 
                     const void *src;
                     if (r >= 0)
                     {
                         src = raw_read_output + 0x40;
                     }
+                    else if (r == FSA_ERROR_OUT_OF_RANGE)
+                    {
+                        log_message(
+                            "SLC dump: raw device reports out of range at sector %llu; "
+                            "stopping without fabricating the remaining data",
+                            static_cast<unsigned long long>(sector + i));
+                        aborted = true;
+                        break;
+                    }
                     else
                     {
                         bad_sectors++;
                         src = zero_sector; // keeps later data at the right offset
-                        log_message("SLC dump: bad sector %llu, err %d (zero-filled)",
-                                    static_cast<unsigned long long>(sector + i), r);
+                        log_message("SLC dump: bad sector %llu failed after %d attempts "
+                                    "(ioctl=%d, raw_status=%d%s; zero-filled)",
+                                    static_cast<unsigned long long>(sector + i),
+                        sector_attempts,
+                                    sector_diagnostics.ioctl_result,
+                                    sector_diagnostics.raw_status,
+                                    sector_diagnostics.ioctl_result < 0
+                                        ? ", raw status may be invalid"
+                                        : "");
                     }
 
                     if (!send_all(socket_fd, src, SLC_BYTES_PER_SECTOR))
@@ -497,8 +544,7 @@ static void run_test_for_current_title(void)
     }
 
     test_started = true;
-    log_message("System Menu detected; checking iosuhax raw opens\n");
-
+    log_message("System Menu detected; starting WUPS SLC network dump\n");
     dump_slc_example();
 }
 

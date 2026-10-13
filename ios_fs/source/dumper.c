@@ -9,11 +9,15 @@
 #include "hardware_registers.h"
 #include "svc.h"
 #include "fs_config.h"
+#include "net_socket.h"
 
 fs_config dumper_config __attribute__((section(".dumper_config")));
 
 #define IO_BUFFER_SIZE 0x40000
 #define IO_BUFFER_SPARE_SIZE (IO_BUFFER_SIZE+0x2000)
+#define TRANSFER_SERVER_IPV4 0xC0A80232
+#define TRANSFER_SERVER_PORT 4406
+#define NETWORK_CONNECT_RETRIES 60
 
 // the IO buffer is put behind everything else because there is no access to this region from IOS-FS it seems
 unsigned char io_buffer[IO_BUFFER_SIZE]  __attribute__((aligned(0x40))) __attribute__((section(".io_buffer")));
@@ -54,14 +58,32 @@ int slc_dump(void *deviceHandle, const char* device, const char* filename, int y
     int readResult = 0;
     int writeResult = 0;
     int result = -1;
+    int socket_fd = -1;
+    FL_FILE *file = NULL;
     u32 readSize = IO_BUFFER_SPARE_SIZE / SLC_BYTES_PER_SECTOR;
 
     FS_SLEEP(1000);
 
-    FL_FILE *file = fl_fopen(filename, "w");
-    if (!file) {
-        _printf(20, y_offset, "Failed to open %s for writing", filename);
-        goto error;
+    if (dumper_config.dump_network) {
+        for (int attempt = 0; attempt < NETWORK_CONNECT_RETRIES; attempt++) {
+            socket_fd = net_socket_connect(TRANSFER_SERVER_IPV4, TRANSFER_SERVER_PORT);
+            if (socket_fd >= 0) {
+                break;
+            }
+            if (attempt + 1 < NETWORK_CONNECT_RETRIES) {
+                FS_SLEEP(1000);
+            }
+        }
+        if (socket_fd < 0) {
+            _printf(20, y_offset, "Network connect failed: %d", socket_fd);
+            goto error;
+        }
+    } else {
+        file = fl_fopen(filename, "w");
+        if (!file) {
+            _printf(20, y_offset, "Failed to open %s for writing", filename);
+            goto error;
+        }
     }
 
     do
@@ -81,10 +103,20 @@ int slc_dump(void *deviceHandle, const char* device, const char* filename, int y
             goto error;
         }
         //FS_SLEEP(10);
-        writeResult = fl_fwrite(io_buffer_spare, 1, readSize * SLC_BYTES_PER_SECTOR, file);
-        if (writeResult != readSize * SLC_BYTES_PER_SECTOR) {
-            _printf(20, y_offset + 10, "%s: Failed to write %d bytes to file %s (result: %d)!", device, readSize * SLC_BYTES_PER_SECTOR, file, filename, writeResult);
-            goto error;
+        if (dumper_config.dump_network) {
+            writeResult = net_socket_send_all(
+                socket_fd, io_buffer_spare, readSize * SLC_BYTES_PER_SECTOR);
+            if (writeResult < 0) {
+                _printf(20, y_offset + 10, "%s: Network send failed: %d", device, writeResult);
+                goto error;
+            }
+        } else {
+            writeResult = fl_fwrite(
+                io_buffer_spare, 1, readSize * SLC_BYTES_PER_SECTOR, file);
+            if (writeResult != readSize * SLC_BYTES_PER_SECTOR) {
+                _printf(20, y_offset + 10, "%s: Failed to write %d bytes to file %s (result: %d)!", device, readSize * SLC_BYTES_PER_SECTOR, filename, writeResult);
+                goto error;
+            }
         }
         offset += readSize;
     }
@@ -95,6 +127,12 @@ int slc_dump(void *deviceHandle, const char* device, const char* filename, int y
 error:
     FS_SVC_DESTROYMUTEX(sync_mutex);
 
+    if (socket_fd >= 0) {
+        int close_result = net_socket_close(socket_fd);
+        if (close_result < 0 && result == 0) {
+            result = close_result;
+        }
+    }
     if (file) {
         fl_fclose(file);
     }
@@ -228,12 +266,14 @@ int check_nand_type(void)
 void dump_nand_complete()
 {
     int offset_y = 30;
-    _printf(20, offset_y, "Init SD card....");
-    if ( InitSDCardFAT32() != 0 ) {
-        FS_SLEEP(3000);
-        svcShutdown(SHUTDOWN_TYPE_REBOOT);
+    if (!dumper_config.dump_network) {
+        _printf(20, offset_y, "Init SD card....");
+        if (InitSDCardFAT32() != 0) {
+            FS_SLEEP(3000);
+            svcShutdown(SHUTDOWN_TYPE_REBOOT);
+        }
+        _printf(20, offset_y, "Init SD card.... Success!");
     }
-    _printf(20, offset_y, "Init SD card.... Success!");
     offset_y += 10;
 
     //wait_format_confirmation();
@@ -326,8 +366,12 @@ void dump_nand_complete()
 
 error:
     offset_y += 20;
-    _printf(20, offset_y, "Error! -> rebooting...");
+    if (dumper_config.dump_network) {
+        _printf(20, offset_y, "Network dump failed; fix the error and relaunch.");
+        return;
+    }
 
+    _printf(20, offset_y, "Error! -> rebooting...");
     FS_SLEEP(3000);
     svcShutdown(SHUTDOWN_TYPE_REBOOT);
 }

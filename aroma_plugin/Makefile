@@ -5,7 +5,13 @@ $(error "Please set DEVKITPRO to the path to devkitPro")
 endif
 
 TOPDIR ?= $(CURDIR)
+ifeq ($(wildcard $(DEVKITPPC)/base_rules),)
+DEVKITPPC := $(DEVKITPRO)/devkitPPC
+endif
 WUPS_ROOT ?= $(DEVKITPRO)/wups
+ifeq ($(wildcard $(WUPS_ROOT)/share/wups_rules),)
+WUPS_ROOT := $(HOME)/.local/share/devkitpro/wups
+endif
 include $(WUPS_ROOT)/share/wups_rules
 WUT_ROOT := $(DEVKITPRO)/wut
 export LD := $(CC)

@@ -73,22 +73,21 @@ void fs_run_patches(u32 ios_elf_start)
     // patch FS logging
     section_write_word(ios_elf_start, FS_PRINTF_SYSLOG, ARM_B(FS_PRINTF_SYSLOG, FS_SYSLOG_OUTPUT));
 
-    // Network mode: only allow raw opens, then stop.                                                     
-    // No SD/SLC redirection hooks, no ECC hook, no dump thread.                                            
-    if (cfw_config.dumpNetwork)                                                                               
-    {                                                                                                         
-        u32 patch_count = (u32)(((u8*)fs_patches_table_end) - ((u8*)fs_patches_table)) / sizeof(patch_table_t); 
-        u32 i;                                                                                              
-        for (i = 0; i < patch_count; i++)                                                                  
-        {                                                                                                
-            if (fs_patches_table[i].address == FS_RAWOPEN_PATCH_ADDR)                                       
-            {                                                                                               
-                patch_table_entries(ios_elf_start, &fs_patches_table[i], 1);                                  
-                break;                                                                                      
-            }                                                                                        
-        }                                                                                                   
-        return;                                                                                            
-    }              
+    if (cfw_config.dumpNetwork)
+    {
+        u32 patch_count = (u32)(((u8*)fs_patches_table_end) -
+                                ((u8*)fs_patches_table)) / sizeof(patch_table_t);
+        for (u32 i = 0; i < patch_count; i++)
+        {
+            if (fs_patches_table[i].address == FS_RAWOPEN_PATCH_ADDR)
+            {
+                patch_table_entries(ios_elf_start, &fs_patches_table[i], 1);
+                break;
+            }
+        }
+
+        return;
+    }
 
     section_write_word(ios_elf_start, CALL_FS_REGISTERMDPHYSICALDEVICE, ARM_BL(CALL_FS_REGISTERMDPHYSICALDEVICE, registerMdDevice_hook));
     section_write_word(ios_elf_start, FS_GETMDDEVICEBYID + 8, ARM_BL((FS_GETMDDEVICEBYID + 8), getMdDeviceById_hook));

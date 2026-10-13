@@ -24,3 +24,6 @@ Ik ben zelf niet goed in echt rekenen dus daar heb ik AI voor gebruikt. Voor de 
 
 Het scrumbord zal nog worden aangepast natuurlijk want ik zie nu dat er ook nog launch 2 app open staat, dit is in principe de Aroma plugin maar zal dit beter verwoorden.
 ![alt text](Scrumbord1.png)
+
+
+Heb nu opgelost dat de SLC wordt afgerond, alleen mist nu de ECC gedeeltde van SLC omdat ik problemen daarmee had, ik kijk morgen verder.
