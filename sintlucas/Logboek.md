@@ -15,3 +15,7 @@ Voor logs (luisteren naar port 4405):
 ```
 sudo tcpdump -n -A -i en0 udp port 4405
 ```
+
+
+### 13-09
+Vandaag ben ik verder gegaan met kijken hoe ik de console normaal laat booten. Hij boot nu naar een zwart scherm waar de console volledig unresponsive is.

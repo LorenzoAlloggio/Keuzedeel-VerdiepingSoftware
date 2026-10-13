@@ -90,7 +90,7 @@ int Menu_Main(int argc, char **argv)
         log_printf_("[nanddumper] Launch cancelled by user\n");
     }
 
-    int fullRelaunch = launch && (!config.dumpNetwork || exploitStatus == 1);
+    int fullRelaunch = launch && !config.dumpNetwork;
 
     unsigned long long titleID = OSGetTitleID();
 
@@ -107,6 +107,9 @@ int Menu_Main(int argc, char **argv)
         if (fullRelaunch) {
             log_printf_("[nanddumper] Requesting full relaunch\n");
             OSForceFullRelaunch();
+            SYSLaunchMenu();
+        } else if (launch) {
+            log_printf_("[nanddumper] Launching system menu with active IOS patch\n");
             SYSLaunchMenu();
         } else if (!launch) {
             log_printf_("[nanddumper] Shutting down\n");
