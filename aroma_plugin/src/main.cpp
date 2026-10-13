@@ -27,14 +27,18 @@ WUPS_PLUGIN_LICENSE("Unspecified");
 
 WUPS_USE_WUT_DEVOPTAB();
 
-#define IOCTL_FSA_OPEN      0x40
-#define IOCTL_FSA_CLOSE     0x41
-#define IOCTL_FSA_RAW_OPEN  0x54
-#define IOCTL_FSA_RAW_READ  0x55
+#define IOCTL_FSA_OPEN 0x40
+#define IOCTL_FSA_CLOSE 0x41
+#define IOCTL_FSA_RAW_OPEN 0x54
+#define IOCTL_FSA_RAW_READ 0x55
 #define IOCTL_FSA_RAW_CLOSE 0x57
 
-#define TRANSFER_SERVER_IP   "192.168.2.50" // Receiver IP, update if it changes.
+#define TRANSFER_SERVER_IP "192.168.2.50" // Receiver IP, update if it changes.
 #define TRANSFER_SERVER_PORT 4406
+#define READ_RETRIES 3
+#define MAX_BAD_SECTORS 64
+
+static uint8_t zero_sector[SLC_BYTES_PER_SECTOR];
 
 static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x840;
 static constexpr uint32_t SLC_SECTOR_COUNT = 0x40000;
@@ -63,7 +67,8 @@ static void log_message(const char *format, ...)
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
 
-    if (!WHBLogPrintf("[NandDumper Auto Test] %s", message)) {
+    if (!WHBLogPrintf("[NandDumper Auto Test] %s", message))
+    {
         OSReport("[NandDumper Auto Test] %s\n", message);
     }
 }
@@ -71,10 +76,31 @@ static void log_message(const char *format, ...)
 static void initialize_logging(void)
 {
     module_logging = WHBLogModuleInit();
-    if (!module_logging) {
+    if (!module_logging)
+    {
         cafe_logging = WHBLogCafeInit();
         udp_logging = WHBLogUdpInit();
     }
+}
+
+static int read_with_retry(
+    IOSHandle iosuhax,
+    int fsa_handle,
+    int raw_device_handle,
+    uint64_t first_sector,
+    uint32_t sector_count)
+{
+    int result = -1;
+    for (int attempt = 0; attempt < READ_RETRIES; attempt++)
+    {
+        result = read_raw_sectors(
+            iosuhax, fsa_handle, raw_device_handle, first_sector, sector_count);
+        if (result >= 0)
+        {
+            return result;
+        }
+    }
+    return result;
 }
 
 // Network test
@@ -84,9 +110,11 @@ static bool send_all(int socket_fd, const void *data, size_t size)
     const char *bytes = static_cast<const char *>(data);
     size_t sent_total = 0;
 
-    while (sent_total < size) {
+    while (sent_total < size)
+    {
         ssize_t sent = send(socket_fd, bytes + sent_total, size - sent_total, 0);
-        if (sent <= 0) {
+        if (sent <= 0)
+        {
             return false;
         }
         sent_total += static_cast<size_t>(sent);
@@ -100,12 +128,12 @@ static int __attribute__((unused)) read_raw_sectors(
     int fsa_handle,
     int raw_device_handle,
     uint64_t first_sector,
-    uint32_t sector_count
-)
+    uint32_t sector_count)
 {
     if (sector_count == 0 || sector_count > CHUNK_SECTORS ||
         first_sector >= SLC_SECTOR_COUNT ||
-        sector_count > SLC_SECTOR_COUNT - first_sector) {
+        sector_count > SLC_SECTOR_COUNT - first_sector)
+    {
         return IOS_ERROR_INVALID;
     }
 
@@ -125,8 +153,7 @@ static int __attribute__((unused)) read_raw_sectors(
         raw_read_args,
         sizeof(raw_read_args),
         raw_read_output,
-        0x40 + sector_count * SLC_BYTES_PER_SECTOR
-    );
+        0x40 + sector_count * SLC_BYTES_PER_SECTOR);
     return result < 0 ? result : static_cast<int>(*reinterpret_cast<uint32_t *>(raw_read_output));
 }
 
@@ -136,7 +163,8 @@ static int connect_to_receiver(void)
     socket_lib_init();
 
     int socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socket_fd < 0) {
+    if (socket_fd < 0)
+    {
         log_message("TCP socket creation failed: %d", socket_fd);
         return -1;
     }
@@ -144,7 +172,8 @@ static int connect_to_receiver(void)
     sockaddr_in server_address = {};
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(TRANSFER_SERVER_PORT);
-    if (inet_pton(AF_INET, TRANSFER_SERVER_IP, &server_address.sin_addr) != 1) {
+    if (inet_pton(AF_INET, TRANSFER_SERVER_IP, &server_address.sin_addr) != 1)
+    {
         log_message("Invalid transfer server IP: %s", TRANSFER_SERVER_IP);
         close(socket_fd);
         return -1;
@@ -153,13 +182,12 @@ static int connect_to_receiver(void)
     log_message(
         "Connecting to %s:%u",
         TRANSFER_SERVER_IP,
-        static_cast<unsigned int>(TRANSFER_SERVER_PORT)
-    );
+        static_cast<unsigned int>(TRANSFER_SERVER_PORT));
     if (connect(
             socket_fd,
             reinterpret_cast<const sockaddr *>(&server_address),
-            sizeof(server_address)
-        ) < 0) {
+            sizeof(server_address)) < 0)
+    {
         log_message("TCP connection failed");
         close(socket_fd);
         return -1;
@@ -172,13 +200,17 @@ static void run_network_test(void)
 {
     static const char test_message[] = "NANDDUMPER NETWORK TEST\n";
     int socket_fd = connect_to_receiver();
-    if (socket_fd < 0) {
+    if (socket_fd < 0)
+    {
         return;
     }
 
-    if (!send_all(socket_fd, test_message, sizeof(test_message) - 1)) {
+    if (!send_all(socket_fd, test_message, sizeof(test_message) - 1))
+    {
         log_message("Failed to send network test marker");
-    } else {
+    }
+    else
+    {
         log_message("Network test marker sent");
     }
 
@@ -190,7 +222,8 @@ static void run_network_test(void)
 static void __attribute__((unused)) dump_slc_example(void)
 {
     IOSHandle iosuhax = IOS_Open("/dev/iosuhax", (IOSOpenMode)0);
-    if (iosuhax < 0) {
+    if (iosuhax < 0)
+    {
         log_message("SLC dump: iosuhax open failed: %d", iosuhax);
         return;
     }
@@ -203,13 +236,17 @@ static void __attribute__((unused)) dump_slc_example(void)
     memset(out_buf, 0, sizeof(out_buf));
     IOSError result = IOS_Ioctl(iosuhax, IOCTL_FSA_OPEN, NULL, 0, out_buf, 4);
     fsa_handle = static_cast<int>(out_buf[0]);
-    if (result < 0 || fsa_handle < 0) {
+    if (result < 0 || fsa_handle < 0)
+    {
         log_message("SLC dump: FSA open failed: ioctl=%d handle=%d", result, fsa_handle);
-    } else {
+    }
+    else
+    {
         fsa_open = true;
     }
 
-    if (fsa_open) {
+    if (fsa_open)
+    {
         const char device_path[] = "/dev/slc01";
         memset(in_buf, 0, sizeof(in_buf));
         memset(out_buf, 0, sizeof(out_buf));
@@ -223,76 +260,130 @@ static void __attribute__((unused)) dump_slc_example(void)
             in_buf,
             8 + sizeof(device_path),
             out_buf,
-            8
-        );
+            8);
         int raw_result = static_cast<int>(out_buf[0]);
         raw_device_handle = static_cast<int>(out_buf[1]);
-        if (result < 0 || raw_result < 0) {
+        if (result < 0 || raw_result < 0)
+        {
             log_message(
                 "SLC dump: raw open failed: ioctl=%d result=%d",
                 result,
-                raw_result
-            );
+                raw_result);
             raw_device_handle = -1;
         }
     }
 
-    if (raw_device_handle >= 0) {
+    if (raw_device_handle >= 0)
+    {
         socket_fd = connect_to_receiver();
-        if (socket_fd < 0) {
+        if (socket_fd < 0)
+        {
             log_message("SLC dump: start the Mac receiver, then retry");
         }
     }
 
-    if (socket_fd >= 0) {
+    if (socket_fd >= 0)
+    {
         log_message("SLC dump: reading %u sectors", SLC_SECTOR_COUNT);
         uint64_t sector = 0;
-        while (sector < SLC_SECTOR_COUNT) {
+        uint32_t bad_sectors = 0;
+        bool aborted = false;
+
+        while (sector < SLC_SECTOR_COUNT && !aborted)
+        {
             uint32_t remaining = SLC_SECTOR_COUNT - sector;
             uint32_t count = remaining < CHUNK_SECTORS ? remaining : CHUNK_SECTORS;
-            int read_result = read_raw_sectors(
-                iosuhax,
-                fsa_handle,
-                raw_device_handle,
-                sector,
-                count
-            );
-            if (read_result < 0) {
-                log_message("SLC dump: read failed at sector %llu: %d",
+
+            int read_result = read_with_retry(
+                iosuhax, fsa_handle, raw_device_handle, sector, count);
+
+            if (read_result >= 0)
+            {
+                // Whole chunk read fine
+                size_t bytes = static_cast<size_t>(count) * SLC_BYTES_PER_SECTOR;
+                if (!send_all(socket_fd, raw_read_output + 0x40, bytes))
+                {
+                    log_message("SLC dump: network send failed at sector %llu",
+                                static_cast<unsigned long long>(sector));
+                    break;
+                }
+            }
+            else
+            {
+                // Chunk failed after retries
+                log_message("SLC dump: chunk at sector %llu failed (err %d), "
+                            "reading one sector at a time",
                             static_cast<unsigned long long>(sector),
                             read_result);
-                break;
-            }
 
-            size_t bytes = static_cast<size_t>(count) * SLC_BYTES_PER_SECTOR;
-            if (!send_all(socket_fd, raw_read_output + 0x40, bytes)) {
-                log_message("SLC dump: network send failed at sector %llu",
-                            static_cast<unsigned long long>(sector));
-                break;
+                for (uint32_t i = 0; i < count; i++)
+                {
+                    int r = read_with_retry(
+                        iosuhax, fsa_handle, raw_device_handle, sector + i, 1);
+
+                    const void *src;
+                    if (r >= 0)
+                    {
+                        src = raw_read_output + 0x40;
+                    }
+                    else
+                    {
+                        bad_sectors++;
+                        src = zero_sector; // keeps later data at the right offset
+                        log_message("SLC dump: bad sector %llu, err %d (zero-filled)",
+                                    static_cast<unsigned long long>(sector + i), r);
+                    }
+
+                    if (!send_all(socket_fd, src, SLC_BYTES_PER_SECTOR))
+                    {
+                        log_message("SLC dump: network send failed at sector %llu",
+                                    static_cast<unsigned long long>(sector + i));
+                        aborted = true;
+                        break;
+                    }
+
+                    if (bad_sectors >= MAX_BAD_SECTORS)
+                    {
+                        log_message("SLC dump: too many bad sectors, aborting");
+                        aborted = true;
+                        break;
+                    }
+                }
+                if (aborted)
+                {
+                    break;
+                }
             }
 
             sector += count;
-            if (sector % 0x1000 == 0 || sector == SLC_SECTOR_COUNT) {
-                log_message("SLC dump progress: %llu / %u sectors",
+            if (sector % 0x1000 == 0 || sector == SLC_SECTOR_COUNT)
+            {
+                log_message("SLC dump progress: %llu / %u sectors (%u bad)",
                             static_cast<unsigned long long>(sector),
-                            SLC_SECTOR_COUNT);
+                            SLC_SECTOR_COUNT, bad_sectors);
             }
         }
+
+        log_message("SLC dump finished: %u bad sectors%s",
+                    bad_sectors, aborted ? " (ABORTED)" : "");
     }
 
-    if (socket_fd >= 0) {
+    if (socket_fd >= 0)
+    {
         shutdown(socket_fd, SHUT_WR);
         close(socket_fd);
     }
 
-    if (raw_device_handle >= 0) {
+    if (raw_device_handle >= 0)
+    {
         in_buf[0] = static_cast<uint32_t>(fsa_handle);
         in_buf[1] = static_cast<uint32_t>(raw_device_handle);
         result = IOS_Ioctl(iosuhax, IOCTL_FSA_RAW_CLOSE, in_buf, 8, out_buf, 4);
         log_message("SLC dump: raw close -> %d", result);
     }
 
-    if (fsa_open) {
+    if (fsa_open)
+    {
         in_buf[0] = static_cast<uint32_t>(fsa_handle);
         result = IOS_Ioctl(iosuhax, IOCTL_FSA_CLOSE, in_buf, 4, out_buf, 4);
         log_message("SLC dump: FSA close -> %d", result);
@@ -311,7 +402,8 @@ static void run_raw_open_test(void)
     };
 
     IOSHandle iosuhax = IOS_Open("/dev/iosuhax", (IOSOpenMode)0);
-    if (iosuhax < 0) {
+    if (iosuhax < 0)
+    {
         log_message("iosuhax unavailable: %d", iosuhax);
         return;
     }
@@ -319,14 +411,16 @@ static void run_raw_open_test(void)
     memset(out_buf, 0, sizeof(out_buf));
     IOSError result = IOS_Ioctl(iosuhax, IOCTL_FSA_OPEN, NULL, 0, out_buf, 4);
     int fsa = (int)out_buf[0];
-    if (result < 0 || fsa < 0) {
+    if (result < 0 || fsa < 0)
+    {
         log_message("FSA open failed: ioctl=%d fsa=%d", result, fsa);
         IOS_Close(iosuhax);
         return;
     }
     log_message("FSA handle: %d", fsa);
 
-    for (unsigned int i = 0; i < sizeof(devices) / sizeof(devices[0]); i++) {
+    for (unsigned int i = 0; i < sizeof(devices) / sizeof(devices[0]); i++)
+    {
         unsigned int path_len = strlen(devices[i]) + 1;
 
         memset(in_buf, 0, sizeof(in_buf));
@@ -341,8 +435,7 @@ static void run_raw_open_test(void)
             in_buf,
             8 + path_len,
             out_buf,
-            8
-        );
+            8);
         int raw_result = (int)out_buf[0];
         int handle = (int)out_buf[1];
         log_message(
@@ -350,10 +443,10 @@ static void run_raw_open_test(void)
             devices[i],
             result,
             raw_result,
-            handle
-        );
+            handle);
 
-        if (result >= 0 && raw_result >= 0) {
+        if (result >= 0 && raw_result >= 0)
+        {
             in_buf[0] = (unsigned int)fsa;
             in_buf[1] = (unsigned int)handle;
             result = IOS_Ioctl(iosuhax, IOCTL_FSA_RAW_CLOSE, in_buf, 8, out_buf, 4);
@@ -386,14 +479,17 @@ static void run_test_for_current_title(void)
     bool is_system_menu = false;
     for (unsigned int i = 0;
          i < sizeof(system_menu_title_ids) / sizeof(system_menu_title_ids[0]);
-         i++) {
-        if (title_id == system_menu_title_ids[i]) {
+         i++)
+    {
+        if (title_id == system_menu_title_ids[i])
+        {
             is_system_menu = true;
             break;
         }
     }
 
-    if (!is_system_menu || test_started) {
+    if (!is_system_menu || test_started)
+    {
         return;
     }
 
@@ -403,23 +499,31 @@ static void run_test_for_current_title(void)
     dump_slc_example();
 }
 
-INITIALIZE_PLUGIN() {
+INITIALIZE_PLUGIN()
+{
     initialize_logging();
     run_test_for_current_title();
 }
 
-ON_APPLICATION_START() {
+ON_APPLICATION_START()
+{
     run_test_for_current_title();
 }
 
-DEINITIALIZE_PLUGIN() {
-    if (module_logging) {
+DEINITIALIZE_PLUGIN()
+{
+    if (module_logging)
+    {
         WHBLogModuleDeinit();
-    } else {
-        if (cafe_logging) {
+    }
+    else
+    {
+        if (cafe_logging)
+        {
             WHBLogCafeDeinit();
         }
-        if (udp_logging) {
+        if (udp_logging)
+        {
             WHBLogUdpDeinit();
         }
     }
