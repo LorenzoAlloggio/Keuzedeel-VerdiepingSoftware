@@ -10,8 +10,10 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 .DS_Store
+slc.bin
 build/
 *.o
 *.d
 *.elf
 *.map
+aroma_plugin/network-test.bin
