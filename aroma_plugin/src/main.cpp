@@ -38,11 +38,12 @@ WUPS_USE_WUT_DEVOPTAB();
 #define READ_RETRIES 3
 #define MAX_BAD_SECTORS 64
 
-static uint8_t zero_sector[SLC_BYTES_PER_SECTOR];
 
 static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x840;
 static constexpr uint32_t SLC_SECTOR_COUNT = 0x40000;
 static constexpr uint32_t CHUNK_SECTORS = 0x80;
+
+static uint8_t zero_sector[SLC_BYTES_PER_SECTOR];
 
 static uint8_t raw_read_output[0x40 + CHUNK_SECTORS * SLC_BYTES_PER_SECTOR]
     __attribute__((aligned(0x40)));
@@ -81,6 +82,40 @@ static void initialize_logging(void)
         cafe_logging = WHBLogCafeInit();
         udp_logging = WHBLogUdpInit();
     }
+}
+
+static int __attribute__((unused)) read_raw_sectors(
+    IOSHandle iosuhax,
+    int fsa_handle,
+    int raw_device_handle,
+    uint64_t first_sector,
+    uint32_t sector_count)
+{
+    if (sector_count == 0 || sector_count > CHUNK_SECTORS ||
+        first_sector >= SLC_SECTOR_COUNT ||
+        sector_count > SLC_SECTOR_COUNT - first_sector)
+    {
+        return IOS_ERROR_INVALID;
+    }
+
+    memset(raw_read_args, 0, sizeof(raw_read_args));
+    memset(raw_read_output, 0, 0x40);
+
+    raw_read_args[0] = static_cast<uint32_t>(fsa_handle);
+    raw_read_args[1] = SLC_BYTES_PER_SECTOR;
+    raw_read_args[2] = sector_count;
+    raw_read_args[3] = static_cast<uint32_t>(first_sector >> 32);
+    raw_read_args[4] = static_cast<uint32_t>(first_sector);
+    raw_read_args[5] = static_cast<uint32_t>(raw_device_handle);
+
+    IOSError result = IOS_Ioctl(
+        iosuhax,
+        IOCTL_FSA_RAW_READ,
+        raw_read_args,
+        sizeof(raw_read_args),
+        raw_read_output,
+        0x40 + sector_count * SLC_BYTES_PER_SECTOR);
+    return result < 0 ? result : static_cast<int>(*reinterpret_cast<uint32_t *>(raw_read_output));
 }
 
 static int read_with_retry(
@@ -123,39 +158,7 @@ static bool send_all(int socket_fd, const void *data, size_t size)
     return true;
 }
 
-static int __attribute__((unused)) read_raw_sectors(
-    IOSHandle iosuhax,
-    int fsa_handle,
-    int raw_device_handle,
-    uint64_t first_sector,
-    uint32_t sector_count)
-{
-    if (sector_count == 0 || sector_count > CHUNK_SECTORS ||
-        first_sector >= SLC_SECTOR_COUNT ||
-        sector_count > SLC_SECTOR_COUNT - first_sector)
-    {
-        return IOS_ERROR_INVALID;
-    }
 
-    memset(raw_read_args, 0, sizeof(raw_read_args));
-    memset(raw_read_output, 0, 0x40);
-
-    raw_read_args[0] = static_cast<uint32_t>(fsa_handle);
-    raw_read_args[1] = SLC_BYTES_PER_SECTOR;
-    raw_read_args[2] = sector_count;
-    raw_read_args[3] = static_cast<uint32_t>(first_sector >> 32);
-    raw_read_args[4] = static_cast<uint32_t>(first_sector);
-    raw_read_args[5] = static_cast<uint32_t>(raw_device_handle);
-
-    IOSError result = IOS_Ioctl(
-        iosuhax,
-        IOCTL_FSA_RAW_READ,
-        raw_read_args,
-        sizeof(raw_read_args),
-        raw_read_output,
-        0x40 + sector_count * SLC_BYTES_PER_SECTOR);
-    return result < 0 ? result : static_cast<int>(*reinterpret_cast<uint32_t *>(raw_read_output));
-}
 
 // Connect to the Mac receiver and send a marker, not NAND data.
 static int connect_to_receiver(void)
