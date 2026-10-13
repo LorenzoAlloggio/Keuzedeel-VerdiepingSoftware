@@ -1,4 +1,3 @@
-# .github/workflows/build.yml
 name: Build
 
 on:
@@ -9,29 +8,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: devkitpro/devkitppc:latest
-
     steps:
-      - name: Install git
-        run: apt-get update && apt-get install -y git
-
       - uses: actions/checkout@v4
 
-      - name: Install wut and Wii U libraries
+      - name: Build image
+        run: docker build -t wiiu-builder .
+
+      - name: Build nanddumper.elf and plugin
         run: |
-          dkp-pacman -Syu --noconfirm
-          dkp-pacman -S --noconfirm wiiu-dev
-
-      - name: Build and install WiiUPluginSystem
-        run: |
-          git clone --depth 1 https://github.com/wiiu-env/WiiUPluginSystem.git /tmp/WiiUPluginSystem
-          make -C /tmp/WiiUPluginSystem install
-
-      - name: Build nanddumper.elf
-        run: make
-
-      - name: Build plugin (.wps)
-        run: make -C aroma_plugin WUPS_ROOT=$DEVKITPRO/wups
+          docker run --rm -v "$PWD":/project wiiu-builder sh -c \
+            'make && make -C aroma_plugin WUPS_ROOT=$DEVKITPRO/wups'
 
       - uses: actions/upload-artifact@v4
         with:
