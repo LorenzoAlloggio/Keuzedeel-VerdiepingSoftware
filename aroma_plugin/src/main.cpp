@@ -40,7 +40,7 @@ WUPS_USE_WUT_DEVOPTAB();
 #define FSA_ERROR_DATA_CORRUPTED (-0x3001B)
 #define FSA_ERROR_OUT_OF_RANGE (-0x3002B)
 
-static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x840;
+static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x800;
 static constexpr uint32_t SLC_SECTOR_COUNT = 0x40000;
 static constexpr uint32_t CHUNK_SECTORS = 0x80;
 
@@ -110,6 +110,7 @@ static int __attribute__((unused)) read_raw_sectors(
 
     memset(raw_read_args, 0, sizeof(raw_read_args));
     memset(raw_read_output, 0, 0x40);
+    memset(raw_read_output + 0x40, 0, sector_count * SLC_BYTES_PER_SECTOR);
 
     raw_read_args[0] = static_cast<uint32_t>(fsa_handle);
     raw_read_args[1] = SLC_BYTES_PER_SECTOR;
@@ -287,7 +288,8 @@ static void dump_slc_example(void)
         if (result < 0 || raw_result < 0)
         {
             log_message(
-                "SLC dump: raw open failed: ioctl=%d result=%d",
+                "SLC dump: raw open failed: ioctl=%d result=%d; WPS raw reads are disabled "
+                "in favor of the native IOS-FS network dumper",
                 result,
                 raw_result);
             raw_device_handle = -1;
@@ -306,10 +308,11 @@ static void dump_slc_example(void)
     if (socket_fd >= 0)
     {
         log_message(
-            "SLC dump: reading %u data sectors (%u bytes each; spare area included)",
+            "SLC dump: reading %u data sectors (%u bytes each; spare area excluded)",
             SLC_SECTOR_COUNT, SLC_BYTES_PER_SECTOR);
         uint64_t sector = 0;
         uint32_t read_errors = 0;
+        uint32_t unverified_sectors = 0;
         bool aborted = false;
 
         while (sector < SLC_SECTOR_COUNT && !aborted)
@@ -360,6 +363,18 @@ static void dump_slc_example(void)
                     {
                         src = raw_read_output + 0x40;
                     }
+                    else if (r == FSA_ERROR_DATA_CORRUPTED)
+                    {
+                        unverified_sectors++;
+                        src = raw_read_output + 0x40;
+                        log_message(
+                            "SLC dump: sector %llu reported DATA_CORRUPTED after %d attempts "
+                            "(ioctl=%d, raw_status=%d); preserving returned bytes as unverified",
+                            static_cast<unsigned long long>(sector + i),
+                            sector_attempts,
+                            sector_diagnostics.ioctl_result,
+                            sector_diagnostics.raw_status);
+                    }
                     else if (r == FSA_ERROR_OUT_OF_RANGE)
                     {
                         log_message(
@@ -408,14 +423,16 @@ static void dump_slc_example(void)
             sector += count;
             if (sector % 0x1000 == 0 || sector == SLC_SECTOR_COUNT)
             {
-                log_message("SLC dump progress: %llu / %u sectors (%u read errors)",
+                log_message(
+                            "SLC dump progress: %llu / %u sectors (%u read errors, %u unverified)",
                             static_cast<unsigned long long>(sector),
-                            SLC_SECTOR_COUNT, read_errors);
+                            SLC_SECTOR_COUNT, read_errors, unverified_sectors);
             }
         }
 
-        log_message("SLC dump finished: %u read errors%s",
-                    read_errors, aborted ? " (ABORTED)" : "");
+        log_message(
+            "SLC dump finished: %u read errors, %u unverified sectors%s",
+            read_errors, unverified_sectors, aborted ? " (ABORTED)" : "");
     }
 
     if (socket_fd >= 0)
@@ -544,8 +561,10 @@ static void run_test_for_current_title(void)
     }
 
     test_started = true;
-    log_message("System Menu detected; starting WUPS SLC network dump\n");
     dump_slc_example();
+    log_message(
+        "System Menu detected; WPS does not read the NAND. IOS-FS should start the native "
+        "SLC dump; start the TCP receiver on port 4406 before launching nanddumper.");
 }
 
 INITIALIZE_PLUGIN()

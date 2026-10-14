@@ -246,6 +246,8 @@ int ShowMenu(cfw_config_t * currentConfig)
 
             console_print_pos(x_offset, 3, "Select your options and press A to launch.");
             console_print_pos(x_offset, 4, "Press HOME to shutdown the console.");
+            if (config.dumpNetwork)
+                console_print_pos(x_offset, 5, "Network mode reloads IOS and sends SLC to TCP port 4406.");
             //console_print_pos(x_offset, 5, "Hold B on start to force enter this menu");
 
             int y_offset = 6;

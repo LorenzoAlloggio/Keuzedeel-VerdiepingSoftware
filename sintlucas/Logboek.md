@@ -16,6 +16,11 @@ Voor logs (luisteren naar port 4405):
 sudo tcpdump -n -A -i en0 udp port 4405
 ```
 
+```
+gmake -C aroma_plugin clean    
+gmake -C aroma_plugin
+```  
+
 
 ### 13-09
 Vandaag ben ik verder gegaan met kijken hoe ik de console normaal laat booten. Hij boot nu naar een zwart scherm waar de console volledig unresponsive is. Ik heb dit opgelost door niet een volledige reboot van het systeem te doen. Hij boot nu in system menu. Ik heb mijn test file waar alle logica van netwerk in gaat zitten etc. een Aroma plugin gemaakt zodat deze code kan executeren na dat het systeem is opgestart met de patches. Hier heb ik een test voor gemaakt zodat ik een file kan krijgen van de Wii U, hier hoort een receiver script bij, dit heb ik in Python gedaan aangezien dit het makkelijkste was. Hiervoor heb ik wel AI gebruikt aangezien ik echt niet wist hoe en wat. Ik heb de AI het niet helemaal laten schrijven alleen een klein begin. Ik krijg nu nog een error als die de SLC nand aan het readen is waardoor de dump incompleet is. Na dit alles ga ik sowieso dingen opruimen en mijzelf hierin verdiepen van hoe alles werkt etc. Ik heb ook nog een GitHub workflow gemaakt waar na elke commit die de 2 files build en gelijk in de releases zet zodat ik niks daar meer hoef te doen en zodat ik het makkelijk terug kan vinden.
@@ -30,4 +35,4 @@ Heb nu opgelost dat de SLC wordt afgerond, alleen mist nu de ECC gedeeltde van S
 
 
 ### 14-09
-Vandaag begonnen met het proberen op te lossen van de SLC read errors. Hierbij heb ik gelijk de size van 0x800 naar 0x840 gezet zodat de ECC memory ook mee komt. Hierna heb ik de Bad Sectors verwijzingen veranderd naar Read Errors aangezien het geen Bad Sectors zijn want als dat in de SLC zou gebeuren, zou de Wii U niet meer booten dus had ik het er verkeerd ingezet.
+Vandaag begonnen met het proberen op te lossen van de SLC read errors. Hierbij heb ik gelijk de size van 0x800 naar 0x840 gezet zodat de ECC memory ook mee komt. Hierna heb ik de Bad Sectors verwijzingen veranderd naar Read Errors aangezien het geen Bad Sectors zijn want als dat in de SLC zou gebeuren, zou de Wii U niet meer booten dus had ik het er verkeerd ingezet. In plaats van dat die nu meteen stopt en null filled met 'read errors' houdt die nu de bytes over en skipt die de sector zodat data niet verloren gaat, dit is alleen geen complete dump aangezien dat dit nog steeds een probleem is. Daarna wilde de Wii U ook niet meer connecten aan mij Mac over TCP wat ik erg vreemd vond maar komt waarschijnlijk omdat die IP veranderd is dus ging ik kijken in settings alleen was die daar gewoon goed ingesteld en ik heb de niet volledige sectors gezet in de 'Unverified Sectors' variable.
