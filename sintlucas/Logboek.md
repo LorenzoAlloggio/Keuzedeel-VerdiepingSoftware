@@ -27,3 +27,7 @@ Het scrumbord zal nog worden aangepast natuurlijk want ik zie nu dat er ook nog 
 
 
 Heb nu opgelost dat de SLC wordt afgerond, alleen mist nu de ECC gedeeltde van SLC omdat ik problemen daarmee had, ik kijk morgen verder.
+
+
+### 14-09
+Vandaag begonnen met het proberen op te lossen van de SLC read errors. Hierbij heb ik gelijk de size van 0x800 naar 0x840 gezet zodat de ECC memory ook mee komt. Hierna heb ik de Bad Sectors verwijzingen veranderd naar Read Errors aangezien het geen Bad Sectors zijn want als dat in de SLC zou gebeuren, zou de Wii U niet meer booten dus had ik het er verkeerd ingezet.

@@ -3,14 +3,21 @@
         {
             "name": "Mac",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "${env:DEVKITPRO}/wut/include",
+                "${env:DEVKITPRO}/portlibs/wiiu/include",
+                "${env:DEVKITPRO}/portlibs/ppc/include",
+                "${env:HOME}/.local/share/devkitpro/wups/include"
             ],
-            "defines": [],
-            "compilerPath": "/usr/bin/clang",
+            "defines": [
+                "__WIIU__",
+                "__WUT__",
+                "__WUPS__"
+            ],
+            "compilerPath": "${env:DEVKITPRO}/devkitPPC/bin/powerpc-eabi-g++",
             "cStandard": "c17",
-            "cppStandard": "c++14",
-            "intelliSenseMode": "macos-clang-arm64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "cppStandard": "c++11",
+            "intelliSenseMode": "macos-gcc-x64"
         }
     ],
     "version": 4

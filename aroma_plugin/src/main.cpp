@@ -35,12 +35,12 @@ WUPS_USE_WUT_DEVOPTAB();
 #define TRANSFER_SERVER_IP "192.168.2.50" // Receiver IP, update if it changes.
 #define TRANSFER_SERVER_PORT 4406
 #define READ_RETRIES 3
-#define MAX_BAD_SECTORS 4096
+#define MAX_READ_ERRORS 4096
 
 #define FSA_ERROR_DATA_CORRUPTED (-0x3001B)
 #define FSA_ERROR_OUT_OF_RANGE (-0x3002B)
 
-static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x800;
+static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x840;
 static constexpr uint32_t SLC_SECTOR_COUNT = 0x40000;
 static constexpr uint32_t CHUNK_SECTORS = 0x80;
 
@@ -148,7 +148,7 @@ static int read_with_retry(
         result = read_raw_sectors(
             iosuhax, fsa_handle, raw_device_handle, first_sector, sector_count,
             diagnostics);
-        if (result >= 0 || result == FSA_ERROR_DATA_CORRUPTED)
+        if (result >= 0)
         {
             return result;
         }
@@ -306,10 +306,10 @@ static void dump_slc_example(void)
     if (socket_fd >= 0)
     {
         log_message(
-            "SLC dump: reading %u data sectors (%u bytes each; spare area excluded)",
+            "SLC dump: reading %u data sectors (%u bytes each; spare area included)",
             SLC_SECTOR_COUNT, SLC_BYTES_PER_SECTOR);
         uint64_t sector = 0;
-        uint32_t bad_sectors = 0;
+        uint32_t read_errors = 0;
         bool aborted = false;
 
         while (sector < SLC_SECTOR_COUNT && !aborted)
@@ -371,9 +371,9 @@ static void dump_slc_example(void)
                     }
                     else
                     {
-                        bad_sectors++;
+                        read_errors++;
                         src = zero_sector; // keeps later data at the right offset
-                        log_message("SLC dump: bad sector %llu failed after %d attempts "
+                        log_message("SLC dump: read error at sector %llu failed after %d attempts "
                                     "(ioctl=%d, raw_status=%d%s; zero-filled)",
                                     static_cast<unsigned long long>(sector + i),
                         sector_attempts,
@@ -392,9 +392,9 @@ static void dump_slc_example(void)
                         break;
                     }
 
-                    if (bad_sectors >= MAX_BAD_SECTORS)
+                    if (read_errors >= MAX_READ_ERRORS)
                     {
-                        log_message("SLC dump: too many bad sectors, aborting");
+                        log_message("SLC dump: too many read errors, aborting");
                         aborted = true;
                         break;
                     }
@@ -408,14 +408,14 @@ static void dump_slc_example(void)
             sector += count;
             if (sector % 0x1000 == 0 || sector == SLC_SECTOR_COUNT)
             {
-                log_message("SLC dump progress: %llu / %u sectors (%u bad)",
+                log_message("SLC dump progress: %llu / %u sectors (%u read errors)",
                             static_cast<unsigned long long>(sector),
-                            SLC_SECTOR_COUNT, bad_sectors);
+                            SLC_SECTOR_COUNT, read_errors);
             }
         }
 
-        log_message("SLC dump finished: %u bad sectors%s",
-                    bad_sectors, aborted ? " (ABORTED)" : "");
+        log_message("SLC dump finished: %u read errors%s",
+                    read_errors, aborted ? " (ABORTED)" : "");
     }
 
     if (socket_fd >= 0)
