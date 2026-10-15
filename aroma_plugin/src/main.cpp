@@ -110,7 +110,7 @@ static int __attribute__((unused)) read_raw_sectors(
 
     memset(raw_read_args, 0, sizeof(raw_read_args));
     memset(raw_read_output, 0, 0x40);
-    memset(raw_read_output + 0x40, 0, sector_count * SLC_BYTES_PER_SECTOR);
+    memset(raw_read_output + 0x40, 0xFF, sector_count * SLC_BYTES_PER_SECTOR);
 
     raw_read_args[0] = static_cast<uint32_t>(fsa_handle);
     raw_read_args[1] = SLC_BYTES_PER_SECTOR;
