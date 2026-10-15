@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Receive one TCP transfer from the Wii U plugin and save its bytes."""
-
 import argparse
 import socket
 from pathlib import Path

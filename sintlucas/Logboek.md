@@ -36,3 +36,7 @@ Heb nu opgelost dat de SLC wordt afgerond, alleen mist nu de ECC gedeeltde van S
 
 ### 14-09
 Vandaag begonnen met het proberen op te lossen van de SLC read errors. Hierbij heb ik gelijk de size van 0x800 naar 0x840 gezet zodat de ECC memory ook mee komt. Hierna heb ik de Bad Sectors verwijzingen veranderd naar Read Errors aangezien het geen Bad Sectors zijn want als dat in de SLC zou gebeuren, zou de Wii U niet meer booten dus had ik het er verkeerd ingezet. In plaats van dat die nu meteen stopt en null filled met 'read errors' houdt die nu de bytes over en skipt die de sector zodat data niet verloren gaat, dit is alleen geen complete dump aangezien dat dit nog steeds een probleem is. Daarna wilde de Wii U ook niet meer connecten aan mij Mac over TCP wat ik erg vreemd vond maar komt waarschijnlijk omdat die IP veranderd is dus ging ik kijken in settings alleen was die daar gewoon goed ingesteld en ik heb de niet volledige sectors gezet in de 'Unverified Sectors' variable.
+
+
+### 15-09
+Ben vandaag weer bezig geweest met het oplossen van de SLC read errors, als dit niet lukt dan ga ik gewoon verder met de andere dumps. Na heel lang uitzoeken ben ik er achtergekomen dat 1, mijn reference SLC verouderd was dus heb ik een nieuwe gemaakt, 2, dat de data corruptions geen data corruptions zijn maar waarschijnlijk iets van encryption. Als ik nu mijn netwerk vs SD dumps bekijk dan verschilt er ongeveer nog 3% maar ik heb hier al te veel tijd aan besteedt dus ga ik alvast de andere dumps voor elkaar krijgen en daarna misschien erop terug kijken.
