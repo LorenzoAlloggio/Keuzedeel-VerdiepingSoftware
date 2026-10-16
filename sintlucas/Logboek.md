@@ -40,3 +40,7 @@ Vandaag begonnen met het proberen op te lossen van de SLC read errors. Hierbij h
 
 ### 15-09
 Ben vandaag weer bezig geweest met het oplossen van de SLC read errors, als dit niet lukt dan ga ik gewoon verder met de andere dumps. Na heel lang uitzoeken ben ik er achtergekomen dat 1, mijn reference SLC verouderd was dus heb ik een nieuwe gemaakt, 2, dat de data corruptions geen data corruptions zijn maar waarschijnlijk iets van encryption. Als ik nu mijn netwerk vs SD dumps bekijk dan verschilt er ongeveer nog 3% maar ik heb hier al te veel tijd aan besteedt dus ga ik alvast de andere dumps voor elkaar krijgen en daarna misschien erop terug kijken.
+
+
+### 16-09
+Ik ben vandaag gestart met OTP dump logica toe te voegen aan de dumper. Veel meer kan ik hier niet over zeggen.
