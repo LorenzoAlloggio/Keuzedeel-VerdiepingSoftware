@@ -17,3 +17,12 @@ build/
 *.elf
 *.map
 aroma_plugin/network-test.bin
+dumps/
+otp.bin
+seeprom.bin
+slc_stripped.bin
+slccmpt.bin
+mlc.bin
+mlc.bin.part*
+*.bin.part
+__pycache__/
