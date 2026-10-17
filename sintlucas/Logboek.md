@@ -44,3 +44,7 @@ Ben vandaag weer bezig geweest met het oplossen van de SLC read errors, als dit 
 
 ### 16-09
 Ik ben vandaag gestart met OTP dump logica toe te voegen aan de dumper. Veel meer kan ik hier niet over zeggen.
+
+
+### 17-09
+Vandaag ben ik begonnen met het toevoegen van de Seeprom logica zodat deze later gedumped kan worden.

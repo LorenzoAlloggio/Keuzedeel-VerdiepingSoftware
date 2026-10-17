@@ -40,6 +40,7 @@ WUPS_USE_WUT_DEVOPTAB();
 
 #define DUMP_OTP 1
 #define DUMP_SLC 1
+#define DUMP_SEEPROM 1
 
 #define FSA_ERROR_DATA_CORRUPTED (-0x3001B)
 #define FSA_ERROR_OUT_OF_RANGE (-0x3002B)
@@ -47,7 +48,9 @@ WUPS_USE_WUT_DEVOPTAB();
 static constexpr uint32_t SLC_BYTES_PER_SECTOR = 0x800;
 static constexpr uint32_t SLC_SECTOR_COUNT = 0x40000;
 static constexpr uint32_t CHUNK_SECTORS = 0x80;
-static constexpr uint32_t OTP_SIZE = 0x400; 
+static constexpr uint32_t OTP_SIZE = 0x400;
+static constexpr uint32_t SEEPROM_SIZE = 0x200;
+static uint16_t seeprom_words[SEEPROM_SIZE / 2];
 
 static uint8_t zero_sector[SLC_BYTES_PER_SECTOR];
 
@@ -312,7 +315,7 @@ static void run_network_test(void)
     close(socket_fd);
 }
 
-static bool __attribute__((unused)) dump_otp(IOSHandle iosuhax, int socket_fd)
+static bool dump_otp(IOSHandle iosuhax, int socket_fd)
 {
     memset(otp_buffer, 0, sizeof(otp_buffer));
     IOSError result = IOS_Ioctl(iosuhax, IOCTL_READ_OTP, NULL, 0, otp_buffer, OTP_SIZE);
@@ -339,7 +342,39 @@ static bool __attribute__((unused)) dump_otp(IOSHandle iosuhax, int socket_fd)
     return sent;
 }
 
-static bool __attribute__((unused)) dump_slc(IOSHandle iosuhax, int socket_fd)
+extern "C" int bspRead(const char *entity, uint32_t instance,
+                       const char *attribute, uint32_t size, void *buffer);
+
+static bool dump_seeprom(int socket_fd)
+{
+    memset(seeprom_words, 0, sizeof(seeprom_words));
+
+    for (uint32_t i = 0; i < SEEPROM_SIZE / 2; i++)
+    {
+        int result = bspRead("EE", i, "access", 2, &seeprom_words[i]);
+        if (result != 0)
+        {
+            log_message("SEEPROM dump: bspRead word %u failed: %d, skipping SEEPROM", i, result);
+            memset(seeprom_words, 0, sizeof(seeprom_words));
+            return true; // non-fatal, same as your OTP path
+        }
+    }
+
+    uint32_t file_crc = 0;
+    bool sent = send_file_header(socket_fd, "seeprom.bin", SEEPROM_SIZE, SEEPROM_SIZE) &&
+                send_chunk(socket_fd, 0, reinterpret_cast<const uint8_t *>(seeprom_words), SEEPROM_SIZE, &file_crc) &&
+                send_file_end(socket_fd, file_crc, 0, 0);
+
+    if (sent)
+        log_message("SEEPROM dump: sent %u bytes, CRC32 %08X", SEEPROM_SIZE, file_crc);
+    else
+        log_message("SEEPROM dump: network send failed");
+
+    memset(seeprom_words, 0, sizeof(seeprom_words));
+    return sent;
+}
+
+static bool dump_slc(IOSHandle iosuhax, int socket_fd)
 {
     int fsa_handle = -1;
     int raw_device_handle = -1;
@@ -489,7 +524,7 @@ static bool __attribute__((unused)) dump_slc(IOSHandle iosuhax, int socket_fd)
                         log_message("SLC dump: read error at sector %llu failed after %d attempts "
                                     "(ioctl=%d, raw_status=%d%s; zero-filled)",
                                     static_cast<unsigned long long>(sector + i),
-                        sector_attempts,
+                                    sector_attempts,
                                     sector_diagnostics.ioctl_result,
                                     sector_diagnostics.raw_status,
                                     sector_diagnostics.ioctl_result < 0
@@ -524,9 +559,9 @@ static bool __attribute__((unused)) dump_slc(IOSHandle iosuhax, int socket_fd)
             if (sector % 0x1000 == 0 || sector == SLC_SECTOR_COUNT)
             {
                 log_message(
-                            "SLC dump progress: %llu / %u sectors (%u read errors, %u unverified)",
-                            static_cast<unsigned long long>(sector),
-                            SLC_SECTOR_COUNT, read_errors, unverified_sectors);
+                    "SLC dump progress: %llu / %u sectors (%u read errors, %u unverified)",
+                    static_cast<unsigned long long>(sector),
+                    SLC_SECTOR_COUNT, read_errors, unverified_sectors);
             }
         }
 
@@ -590,6 +625,12 @@ static void run_network_dump(void)
     if (connection_ok)
     {
         connection_ok = dump_slc(iosuhax, socket_fd);
+    }
+#endif
+#if DUMP_SEEPROM
+    if (connection_ok)
+    {
+        connection_ok = dump_seeprom(socket_fd);
     }
 #endif
 
