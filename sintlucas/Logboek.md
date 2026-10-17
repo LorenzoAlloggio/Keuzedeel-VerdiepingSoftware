@@ -47,4 +47,6 @@ Ik ben vandaag gestart met OTP dump logica toe te voegen aan de dumper. Veel mee
 
 
 ### 17-09
-Vandaag ben ik begonnen met het toevoegen van de Seeprom logica zodat deze later gedumped kan worden.
+Vandaag ben ik begonnen met het toevoegen van de SEEPROM logica zodat deze later gedumped kan worden. Ik heb ook de SLCCMPT logica toegevoegd. Ik heb dit getest op de fysieke console, toen kwam ik erachter dat de opcode voor OTP verkeerd was dus heb ik deze aangepast door deze documentatie: https://raw.githubusercontent.com/wiiu-env/libiosuhax/master/source/iosuhax.c
+
+Daarna heb ik het weer opnieuw getest en toen werkte het, geen idee of de info erin correct is of niet maar dat is voor later. Volgende is MLC wat echt heel lang gaat duren om te dumpen aangezien het 32GB maximaal is...
