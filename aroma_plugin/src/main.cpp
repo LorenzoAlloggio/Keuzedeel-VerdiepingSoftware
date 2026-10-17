@@ -31,7 +31,7 @@ WUPS_USE_WUT_DEVOPTAB();
 #define IOCTL_FSA_RAW_OPEN 0x54
 #define IOCTL_FSA_RAW_READ 0x55
 #define IOCTL_FSA_RAW_CLOSE 0x57
-#define IOCTL_READ_OTP 0x60
+#define IOCTL_READ_OTP 0x08
 
 #define TRANSFER_SERVER_IP "192.168.2.50" // Receiver IP, update if it changes.
 #define TRANSFER_SERVER_PORT 4406
@@ -40,6 +40,7 @@ WUPS_USE_WUT_DEVOPTAB();
 
 #define DUMP_OTP 1
 #define DUMP_SLC 1
+#define DUMP_SLCCMPT 1
 #define DUMP_SEEPROM 1
 
 #define FSA_ERROR_DATA_CORRUPTED (-0x3001B)
@@ -293,7 +294,7 @@ static int connect_to_receiver(void)
     return socket_fd;
 }
 
-static void run_network_test(void)
+static void __attribute__((unused))run_network_test(void)
 {
     static const char test_message[] = "NANDDUMPER NETWORK TEST\n";
     int socket_fd = connect_to_receiver();
@@ -373,6 +374,231 @@ static bool dump_seeprom(int socket_fd)
     memset(seeprom_words, 0, sizeof(seeprom_words));
     return sent;
 }
+
+static bool dump_slccmpt(IOSHandle iosuhax, int socket_fd)
+{
+    int fsa_handle = -1;
+    int raw_device_handle = -1;
+    bool fsa_open = false;
+    bool connection_ok = true;
+
+    memset(out_buf, 0, sizeof(out_buf));
+    IOSError result = IOS_Ioctl(iosuhax, IOCTL_FSA_OPEN, NULL, 0, out_buf, 4);
+    fsa_handle = static_cast<int>(out_buf[0]);
+    if (result < 0 || fsa_handle < 0)
+    {
+        log_message("SLC dump: FSA open failed: ioctl=%d handle=%d", result, fsa_handle);
+    }
+    else
+    {
+        fsa_open = true;
+    }
+
+    if (fsa_open)
+    {
+        const char device_path[] = "/dev/slccmpt01";
+        memset(in_buf, 0, sizeof(in_buf));
+        memset(out_buf, 0, sizeof(out_buf));
+        in_buf[0] = static_cast<uint32_t>(fsa_handle);
+        in_buf[1] = 8;
+        memcpy(reinterpret_cast<char *>(in_buf) + 8, device_path, sizeof(device_path));
+
+        result = IOS_Ioctl(
+            iosuhax,
+            IOCTL_FSA_RAW_OPEN,
+            in_buf,
+            8 + sizeof(device_path),
+            out_buf,
+            8);
+        int raw_result = static_cast<int>(out_buf[0]);
+        raw_device_handle = static_cast<int>(out_buf[1]);
+        if (result < 0 || raw_result < 0)
+        {
+            log_message(
+                "SLC dump: raw open failed: ioctl=%d result=%d; WPS raw reads are disabled "
+                "in favor of the native IOS-FS network dumper",
+                result,
+                raw_result);
+            raw_device_handle = -1;
+        }
+    }
+
+    if (raw_device_handle >= 0)
+    {
+        connection_ok = send_file_header(
+            socket_fd, "slccmpt.bin",
+            static_cast<uint64_t>(SLC_SECTOR_COUNT) * SLC_BYTES_PER_SECTOR,
+            CHUNK_SECTORS * SLC_BYTES_PER_SECTOR);
+        if (!connection_ok)
+        {
+            log_message("SLCCMPT dump: network send failed (file header)");
+        }
+    }
+
+    if (raw_device_handle >= 0 && connection_ok)
+    {
+        log_message(
+            "SLCCMPT dump: reading %u data sectors (%u bytes each; spare area excluded)",
+            SLC_SECTOR_COUNT, SLC_BYTES_PER_SECTOR);
+        uint64_t sector = 0;
+        uint32_t read_errors = 0;
+        uint32_t unverified_sectors = 0;
+        bool aborted = false;
+        uint32_t file_crc = 0;
+
+        while (sector < SLC_SECTOR_COUNT && !aborted)
+        {
+            uint32_t remaining = SLC_SECTOR_COUNT - sector;
+            uint32_t count = remaining < CHUNK_SECTORS ? remaining : CHUNK_SECTORS;
+
+            RawReadDiagnostics read_diagnostics = {};
+            uint32_t chunk_attempts = 0;
+            int read_result = read_with_retry(
+                iosuhax, fsa_handle, raw_device_handle, sector, count,
+                &read_diagnostics, &chunk_attempts);
+
+            if (read_result >= 0)
+            {
+                // Whole chunk read fine
+                size_t bytes = static_cast<size_t>(count) * SLC_BYTES_PER_SECTOR;
+                if (!send_chunk(socket_fd, sector * SLC_BYTES_PER_SECTOR,
+                                raw_read_output + 0x40, static_cast<uint32_t>(bytes),
+                                &file_crc))
+                {
+                    log_message("SLCCMPT dump: network send failed at sector %llu",
+                                static_cast<unsigned long long>(sector));
+                    connection_ok = false;
+                    break;
+                }
+            }
+            else
+            {
+                // Chunk failed after retries
+                log_message("SLCCMPT dump: chunk at sector %llu failed after %d attempts "
+                            "(ioctl=%d, raw_status=%d%s), reading one sector at a time",
+                            static_cast<unsigned long long>(sector),
+                            chunk_attempts,
+                            read_diagnostics.ioctl_result,
+                            read_diagnostics.raw_status,
+                            read_diagnostics.ioctl_result < 0
+                                ? ", raw status may be invalid"
+                                : "");
+
+                for (uint32_t i = 0; i < count; i++)
+                {
+                    RawReadDiagnostics sector_diagnostics = {};
+                    uint32_t sector_attempts = 0;
+                    int r = read_with_retry(
+                        iosuhax, fsa_handle, raw_device_handle, sector + i, 1,
+                        &sector_diagnostics, &sector_attempts);
+
+                    const uint8_t *src;
+                    if (r >= 0)
+                    {
+                        src = raw_read_output + 0x40;
+                    }
+                    else if (r == FSA_ERROR_DATA_CORRUPTED)
+                    {
+                        unverified_sectors++;
+                        src = raw_read_output + 0x40;
+                        log_message(
+                            "SLCCMPT dump: sector %llu reported DATA_CORRUPTED after %d attempts "
+                            "(ioctl=%d, raw_status=%d); preserving returned bytes as unverified",
+                            static_cast<unsigned long long>(sector + i),
+                            sector_attempts,
+                            sector_diagnostics.ioctl_result,
+                            sector_diagnostics.raw_status);
+                    }
+                    else if (r == FSA_ERROR_OUT_OF_RANGE)
+                    {
+                        log_message(
+                            "SLCCMPT dump: raw device reports out of range at sector %llu; "
+                            "stopping without fabricating the remaining data",
+                            static_cast<unsigned long long>(sector + i));
+                        aborted = true;
+                        break;
+                    }
+                    else
+                    {
+                        read_errors++;
+                        src = zero_sector; // keeps later data at the right offset
+                        log_message("SLCCMPT dump: read error at sector %llu failed after %d attempts "
+                                    "(ioctl=%d, raw_status=%d%s; zero-filled)",
+                                    static_cast<unsigned long long>(sector + i),
+                                    sector_attempts,
+                                    sector_diagnostics.ioctl_result,
+                                    sector_diagnostics.raw_status,
+                                    sector_diagnostics.ioctl_result < 0
+                                        ? ", raw status may be invalid"
+                                        : "");
+                    }
+
+                    if (!send_chunk(socket_fd, (sector + i) * SLC_BYTES_PER_SECTOR,
+                                    src, SLC_BYTES_PER_SECTOR, &file_crc))
+                    {
+                        log_message("SLCCMPT dump: network send failed at sector %llu",
+                                    static_cast<unsigned long long>(sector + i));
+                        connection_ok = false;
+                        aborted = true;
+                        break;
+                    }
+
+                    if (read_errors >= MAX_READ_ERRORS)
+                    {
+                        log_message("SLCCMPT dump: too many read errors, aborting");
+                        aborted = true;
+                        break;
+                    }
+                }
+                if (aborted)
+                {
+                    break;
+                }
+            }
+
+            sector += count;
+            if (sector % 0x1000 == 0 || sector == SLC_SECTOR_COUNT)
+            {
+                log_message(
+                    "SLCCMPT dump progress: %llu / %u sectors (%u read errors, %u unverified)",
+                    static_cast<unsigned long long>(sector),
+                    SLC_SECTOR_COUNT, read_errors, unverified_sectors);
+            }
+        }
+
+        log_message(
+            "SLCCMPT dump finished: %u read errors, %u unverified sectors%s",
+            read_errors, unverified_sectors, aborted ? " (ABORTED)" : "");
+
+        // Also sent after an abort, so the receiver can say how much is missing.
+        if (connection_ok)
+        {
+            connection_ok = send_file_end(socket_fd, file_crc, read_errors, unverified_sectors);
+            if (!connection_ok)
+            {
+                log_message("SLCCMPT dump: network send failed (file end)");
+            }
+        }
+    }
+
+    if (raw_device_handle >= 0)
+    {
+        in_buf[0] = static_cast<uint32_t>(fsa_handle);
+        in_buf[1] = static_cast<uint32_t>(raw_device_handle);
+        result = IOS_Ioctl(iosuhax, IOCTL_FSA_RAW_CLOSE, in_buf, 8, out_buf, 4);
+        log_message("SLCCMPT dump: raw close -> %d", result);
+    }
+
+    if (fsa_open)
+    {
+        in_buf[0] = static_cast<uint32_t>(fsa_handle);
+        result = IOS_Ioctl(iosuhax, IOCTL_FSA_CLOSE, in_buf, 4, out_buf, 4);
+        log_message("SLCCMPT dump: FSA close -> %d", result);
+    }
+
+    return connection_ok;
+}
+
 
 static bool dump_slc(IOSHandle iosuhax, int socket_fd)
 {
@@ -633,6 +859,12 @@ static void run_network_dump(void)
         connection_ok = dump_seeprom(socket_fd);
     }
 #endif
+#if DUMP_SLCCMPT
+    if (connection_ok)
+    {
+        connection_ok = dump_slccmpt(iosuhax, socket_fd);
+    }
+#endif
 
     if (connection_ok && send_all(socket_fd, "DONE", 4))
     {
@@ -648,7 +880,7 @@ static void run_network_dump(void)
     IOS_Close(iosuhax);
 }
 
-static void run_raw_open_test(void)
+static void __attribute__((unused)) run_raw_open_test(void)
 {
     static const char *devices[] = {
         "/dev/slc01",
